@@ -44,6 +44,9 @@ setup(
     author='Cole Howard',
     author_email='cole@mineralzen.com',
     description='Opinionated implementation of AWS Glue',
+    cmdclass={
+        'verify': VerifyVersionCommand,
+    },
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
         'Intended Audience :: Developers',
