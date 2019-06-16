@@ -1,25 +1,29 @@
+import os
 import json
+import time
 from datetime import datetime
+from typing import Union
 
 import boto3
+from pyathena import connect
 
 from cheapodb import logger
 
 
 class Database(object):
     def __init__(self, name: str, region: str = None, description: str = None, auto_create=True,
-                 enable_versioning=False, staging_subdir='results',
+                 enable_versioning=False, results_prefix='results/',
                  enable_access_logging=False, create_iam_role=True, iam_role_name=None,
                  tags: dict = None, default_encryption=False, enable_request_metrics=False, enable_object_lock=False,
                  **kwargs):
         self.name = name
         self.region = region
         if not self.region:
-            self.region = 'us-east-1'
+            self.region = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
         self.description = description
         self.auto_create = auto_create
         self.enable_versioning = enable_versioning
-        self.staging_subdir = f's3://{self.name}/{staging_subdir}/'
+        self.results_prefix = results_prefix
         self.enable_access_logging = enable_access_logging
         self.create_iam_role = create_iam_role
         self.iam_role_name = iam_role_name
@@ -29,6 +33,7 @@ class Database(object):
         self.enable_object_lock = enable_object_lock
 
         self.s3 = boto3.resource('s3')
+        self.glue = boto3.client('glue')
         self.bucket = self.s3.Bucket(self.name)
 
         iam = boto3.client('iam')
@@ -108,14 +113,22 @@ class Database(object):
         response = self.bucket.create(**payload)
         logger.debug(response)
 
-        glue = boto3.client('glue')
         payload = dict(Name=self.name)
         if self.description:
             payload['Description'] = self.description
-        glue.create_database(
+        self.glue.create_database(
             DatabaseInput=payload
         )
         return response
+
+    def query(self, sql: str):
+        cursor = connect(
+            s3_staging_dir=f's3://{self.bucket}/{self.results_prefix}',
+            region_name=self.region
+        ).cursor()
+        cursor.execute(sql)
+        for row in cursor:
+            yield row
 
     def grant(self):
         """
@@ -131,3 +144,73 @@ class Database(object):
         :return:
         """
         pass
+
+    def create_crawler(self, prefix) -> str:
+        logger.info(f'Creating crawler {self.name}')
+        try:
+            payload = dict(
+                Name=self.name,
+                Role=self.iam_role_arn,
+                DatabaseName=self.name,
+                Description=f'Crawler created by CheapoDB on {datetime.now():%Y-%m-%d %H:%M:%S}',
+                Targets=dict(
+                    S3Targets=[
+                        {
+                            'Path': f'{self.name}/{prefix}/'
+                        }
+                    ]
+                )
+            )
+            self.glue.create_crawler(**payload)
+            response = self.glue.get_crawler(
+                Name=self.name
+            )
+            return response['Crawler']['Name']
+        except self.glue.exceptions.AlreadyExistsException:
+            logger.warning(f'Crawler {self.name} already exists')
+            response = self.glue.get_crawler(
+                Name=self.name
+            )
+            return response['Crawler']['Name']
+
+    def get_crawler(self, crawler) -> dict:
+        response = self.glue.get_crawler(
+            Name=crawler
+        )
+        return response
+
+    def delete_crawler(self, crawler) -> dict:
+        response = self.glue.delete_crawler(
+            Name=crawler
+        )
+        return response
+
+    def update_tables(self, crawler, wait: Union[bool, int] = 60) -> None:
+        logger.info(f'Updating tables with crawler {crawler}')
+        response = self.glue.start_crawler(
+            Name=crawler
+        )
+        logger.debug(response)
+        if wait:
+            logger.info(f'Waiting for table update to complete...')
+            while True:
+                response = self.get_crawler(crawler)
+                if response['Crawler']['State'] == 'RUNNING':
+                    elapsed = response['Crawler']['CrawlElapsedTime']
+                    logger.info(f'Crawler in RUNNING state. Elapsed time: {elapsed}')
+                    time.sleep(wait)
+                    continue
+                elif response['Crawler']['State'] == 'STOPPING':
+                    elapsed = response['Crawler']['CrawlElapsedTime']
+                    logger.info(f'Crawler in STOPPING state. Elapsed time: {elapsed}')
+                    time.sleep(wait)
+                    continue
+                else:
+                    status = response['Crawler']['LastCrawl']['Status']
+                    logger.info(f'Crawler in READY state. Table update {status}')
+                    break
+
+        return
+
+
+
