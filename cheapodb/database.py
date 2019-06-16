@@ -18,15 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 class Database(object):
-    def __init__(self, name: str, region: str = None, description: str = None, auto_create=False,
+    def __init__(self, name: str, description: str = None, auto_create=False,
                  enable_versioning=False, results_prefix='results/',
                  enable_access_logging=False, create_iam_role=True, iam_role_name=None,
                  tags: dict = None, default_encryption=False, enable_request_metrics=False, enable_object_lock=False,
                  **kwargs):
         self.name = name
-        self.region = region
-        if not self.region:
-            self.region = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
         self.description = description
         self.auto_create = auto_create
         self.enable_versioning = enable_versioning
@@ -39,11 +36,17 @@ class Database(object):
         self.enable_request_metrics = enable_request_metrics
         self.enable_object_lock = enable_object_lock
 
-        self.s3 = boto3.resource('s3')
-        self.glue = boto3.client('glue')
+        self.session = boto3.session.Session(
+            region_name=kwargs.get('aws_default_region', os.getenv('AWS_DEFAULT_REGION')),
+            aws_access_key_id=kwargs.get('aws_access_key_id', os.getenv('AWS_ACCESS_KEY_ID')),
+            aws_secret_access_key=kwargs.get('aws_secret_access_key', os.getenv('AWS_SECRET_ACCESS_KEY'))
+        )
+        self.s3 = self.session.resource('s3')
+        self.glue = self.session.client('glue')
+        iam = self.session.client('iam')
+
         self.bucket = self.s3.Bucket(self.name)
 
-        iam = boto3.client('iam')
         if self.create_iam_role and not self.iam_role_name:
             self.iam_role_name = f'{self.name}-CheapoDBExecutionRole'
             try:
@@ -106,25 +109,24 @@ class Database(object):
             self.iam_role_arn = response['Role']['Arn']
 
         if self.auto_create:
-            self.create(**kwargs)
+            self.create()
 
-    def create(self, **kwargs) -> dict:
-        logger.info(f'Creating database {self.name} in {self.region}')
+    def create(self,) -> dict:
+        logger.info(f'Creating database {self.name} in {self.session.region_name}')
 
-        payload = dict()
-        if self.region != 'us-east-1':
-            payload['CreateBucketConfiguration'] = dict(
-                LocationConstraint=self.region
+        bucket_params =  dict(
+            CreateBucketConfiguration=dict(
+                LocationConstraint=self.session.region_name
             )
-        payload.update(kwargs)
-        response = self.bucket.create(**payload)
+        )
+        response = self.bucket.create(**bucket_params)
         logger.debug(response)
 
-        payload = dict(Name=self.name)
+        db_params = dict(Name=self.name)
         if self.description:
-            payload['Description'] = self.description
+            db_params['Description'] = self.description
         self.glue.create_database(
-            DatabaseInput=payload
+            DatabaseInput=db_params
         )
         return response
 
@@ -141,7 +143,7 @@ class Database(object):
             results_path = f's3://{self.bucket}/{self.results_prefix}'
         cursor = connect(
             s3_staging_dir=results_path,
-            region_name=self.region
+            region_name=self.session.region_name
         ).cursor()
         cursor.execute(sql)
         for row in cursor:
