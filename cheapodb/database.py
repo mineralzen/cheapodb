@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class Database(object):
-    def __init__(self, name: str, region: str = None, description: str = None, auto_create=True,
+    def __init__(self, name: str, region: str = None, description: str = None, auto_create=False,
                  enable_versioning=False, results_prefix='results/',
                  enable_access_logging=False, create_iam_role=True, iam_role_name=None,
                  tags: dict = None, default_encryption=False, enable_request_metrics=False, enable_object_lock=False,
