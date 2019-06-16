@@ -1,13 +1,20 @@
 import os
 import json
 import time
+import logging
 from datetime import datetime
 from typing import Union
 
 import boto3
 from pyathena import connect
 
-from cheapodb import logger
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(name)s %(levelname)-8s %(message)s',
+    datefmt='%a, %d %b %Y %H:%M:%S'
+)
+
+logger = logging.getLogger(__name__)
 
 
 class Database(object):
@@ -157,7 +164,9 @@ class Database(object):
 
     def create_crawler(self, prefix) -> str:
         """
-        Create a Glue crawler
+        Create a new Glue crawler.
+
+        Either loads a crawler or creates it if it doesn't exist.
 
         :param prefix: the DB bucket prefix to crawl
         :return: the name of the created crawler
@@ -182,12 +191,6 @@ class Database(object):
         except self.glue.exceptions.AlreadyExistsException:
             logger.warning(f'Crawler {self.name} already exists')
             return self.glue.get_crawler(Name=self.name)['Crawler']['Name']
-
-    def delete_crawler(self, crawler) -> dict:
-        response = self.glue.delete_crawler(
-            Name=crawler
-        )
-        return response
 
     def update_tables(self, crawler, wait: Union[bool, int] = 60) -> None:
         logger.info(f'Updating tables with crawler {crawler}')
