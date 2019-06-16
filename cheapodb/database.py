@@ -192,8 +192,8 @@ class Database(object):
             self.glue.create_crawler(**payload)
             return self.glue.get_crawler(Name=self.name)['Crawler']['Name']
         except self.glue.exceptions.AlreadyExistsException:
-            logger.warning(f'Crawler {self.name} already exists')
-            return self.glue.get_crawler(Name=self.name)['Crawler']['Name']
+            logger.warning(f'Crawler {name} already exists')
+            return self.glue.get_crawler(Name=name)['Crawler']['Name']
 
     def update_tables(self, crawler, wait: Union[bool, int] = 60) -> None:
         logger.info(f'Updating tables with crawler {crawler}')
