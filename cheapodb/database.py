@@ -190,7 +190,7 @@ class Database(object):
                 )
             )
             self.glue.create_crawler(**payload)
-            return self.glue.get_crawler(Name=self.name)['Crawler']['Name']
+            return self.glue.get_crawler(Name=name)['Crawler']['Name']
         except self.glue.exceptions.AlreadyExistsException:
             logger.warning(f'Crawler {name} already exists')
             return self.glue.get_crawler(Name=name)['Crawler']['Name']
