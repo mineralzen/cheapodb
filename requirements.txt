@@ -1,8 +1,11 @@
 boto3==1.9.169
 botocore==1.12.169
 docutils==0.14
+future==0.17.1
 jmespath==0.9.4
+PyAthena==1.6.1
 python-dateutil==2.8.0
 s3transfer==0.2.1
 six==1.12.0
+tenacity==5.0.4
 urllib3==1.25.3

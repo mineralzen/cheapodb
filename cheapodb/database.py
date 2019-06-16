@@ -1,36 +1,44 @@
+import os
 import json
+import time
+import logging
 from datetime import datetime
+from typing import Union
 
 import boto3
+from pyathena import connect
+from pyathena.cursor import Cursor
 
-from cheapodb import logger
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(name)s %(levelname)-8s %(message)s',
+    datefmt='%a, %d %b %Y %H:%M:%S'
+)
+
+logger = logging.getLogger(__name__)
 
 
 class Database(object):
-    def __init__(self, name: str, region: str = None, description: str = None, auto_create=True,
-                 enable_versioning=False,
-                 enable_access_logging=False, create_iam_role=True, iam_role_name=None,
-                 tags: dict = None, default_encryption=False, enable_request_metrics=False, enable_object_lock=False,
-                 **kwargs):
+    def __init__(self, name: str, description: str = None, auto_create=False, results_prefix='results/',
+                 create_iam_role=True, iam_role_name=None, **kwargs):
         self.name = name
-        self.region = region
-        if not self.region:
-            self.region = 'us-east-1'
         self.description = description
         self.auto_create = auto_create
-        self.enable_versioning = enable_versioning
-        self.enable_access_logging = enable_access_logging
+        self.results_prefix = results_prefix
         self.create_iam_role = create_iam_role
         self.iam_role_name = iam_role_name
-        self.tags = tags
-        self.default_encryption = default_encryption
-        self.enable_request_metrics = enable_request_metrics
-        self.enable_object_lock = enable_object_lock
 
-        self.s3 = boto3.resource('s3')
+        self.session = boto3.session.Session(
+            region_name=kwargs.get('aws_default_region', os.getenv('AWS_DEFAULT_REGION')),
+            aws_access_key_id=kwargs.get('aws_access_key_id', os.getenv('AWS_ACCESS_KEY_ID')),
+            aws_secret_access_key=kwargs.get('aws_secret_access_key', os.getenv('AWS_SECRET_ACCESS_KEY'))
+        )
+        self.s3 = self.session.resource('s3')
+        self.glue = self.session.client('glue')
+        iam = self.session.client('iam')
+
         self.bucket = self.s3.Bucket(self.name)
 
-        iam = boto3.client('iam')
         if self.create_iam_role and not self.iam_role_name:
             self.iam_role_name = f'{self.name}-CheapoDBExecutionRole'
             try:
@@ -81,7 +89,7 @@ class Database(object):
                 )
                 logger.debug(response)
             except iam.exceptions.EntityAlreadyExistsException:
-                logger.warning(f'Role already exists for database: CheapoDBRole-{self.name}')
+                logger.debug(f'Role already exists for database: CheapoDBRole-{self.name}')
                 response = iam.get_role(
                     RoleName=self.iam_role_name
                 )
@@ -93,40 +101,128 @@ class Database(object):
             self.iam_role_arn = response['Role']['Arn']
 
         if self.auto_create:
-            self.create(**kwargs)
+            self.create()
 
-    def create(self, **kwargs) -> dict:
-        logger.info(f'Creating database {self.name} in {self.region}')
+    def create(self, ) -> dict:
+        logger.info(f'Creating database {self.name} in {self.session.region_name}')
 
-        payload = dict()
-        if self.region != 'us-east-1':
-            payload['CreateBucketConfiguration'] = dict(
-                LocationConstraint=self.region
+        bucket_params = dict(
+            CreateBucketConfiguration=dict(
+                LocationConstraint=self.session.region_name
             )
-        payload.update(kwargs)
-        response = self.bucket.create(**payload)
+        )
+        response = self.bucket.create(**bucket_params)
         logger.debug(response)
 
-        glue = boto3.client('glue')
-        payload = dict(Name=self.name)
+        db_params = dict(Name=self.name)
         if self.description:
-            payload['Description'] = self.description
-        glue.create_database(
-            DatabaseInput=payload
+            db_params['Description'] = self.description
+        self.glue.create_database(
+            DatabaseInput=db_params
         )
         return response
 
-    def grant(self):
+    def query(self, sql: str, results_path: str = None) -> dict:
         """
-        S3 bucket access list modeled after db permission grant
+        Execute a query
 
+        :param sql: the Athena-compliant SQL to execute
+        :param results_path: optional S3 path to write results. Defaults to current DB bucket and
+        instance results_prefix
         :return:
         """
-        pass
+        if not results_path:
+            results_path = f's3://{self.bucket.name}/{self.results_prefix}'
 
-    def create_lifecycle_rule(self):
-        """
+        cursor = self.export(sql, results_path)
+        columns = [column[0] for column in cursor.description]
+        logger.info(cursor.description)
+        for row in cursor:
+            yield dict(zip(columns, row))
 
-        :return:
+    def export(self, sql: str, results_path: str) -> Cursor:
         """
-        pass
+        Execute a query and return the cursor
+
+        :param sql: the Athena-compliant SQL to execute
+        :param results_path: required S3 path to write export
+        :return: a pyathena cursor object
+        """
+        cursor = connect(
+            s3_staging_dir=results_path,
+            region_name=self.session.region_name
+        ).cursor()
+        cursor.execute(sql)
+        return cursor
+
+    def create_crawler(self, name, schedule: str = None, table_prefix: str = None, update_behavior='UPDATE_IN_DATABASE',
+                       delete_behavior='DELETE_FROM_DATABASE') -> str:
+        """
+        Create a new Glue crawler.
+
+        Either loads a crawler or creates it if it doesn't exist. The provided name of the crawler
+        corresponds to the prefix of the DB bucket it will target.
+
+        :param name: the DB bucket prefix to crawl
+        :param schedule: an optional schedule in cron syntax to run the crawler
+        :param table_prefix: an optional prefix to apply to the created tables
+        :param update_behavior: how the crawler should handle schema updates
+        :param delete_behavior: how the crawler should handle deletions
+        :return: the name of the created crawler
+        """
+        try:
+            logger.debug(f'Creating crawler {name}')
+            payload = dict(
+                Name=name,
+                Role=self.iam_role_arn,
+                DatabaseName=self.name,
+                Description=f'Crawler created by CheapoDB on {datetime.now():%Y-%m-%d %H:%M:%S}',
+                Targets=dict(
+                    S3Targets=[
+                        {
+                            'Path': f'{self.name}/{name}/'
+                        }
+                    ]
+                ),
+                TablePrefix=table_prefix,
+                SchemaChangePolicy={
+                    'UpdateBehavior': update_behavior,
+                    'DeleteBehavior': delete_behavior
+                }
+            )
+            if schedule:
+                payload['Schedule'] = schedule
+            self.glue.create_crawler(**payload)
+            return self.glue.get_crawler(Name=name)['Crawler']['Name']
+        except self.glue.exceptions.AlreadyExistsException:
+            logger.debug(f'Crawler {name} already exists')
+            return self.glue.get_crawler(Name=name)['Crawler']['Name']
+
+    def update_tables(self, crawler, wait: Union[bool, int] = 60) -> None:
+        logger.info(f'Updating tables with crawler {crawler}')
+        response = self.glue.start_crawler(
+            Name=crawler
+        )
+        logger.debug(response)
+        if wait:
+            logger.info(f'Waiting for table update to complete...')
+            while True:
+                response = self.glue.get_crawler(Name=crawler)
+                elapsed = response['Crawler']['CrawlElapsedTime'] / 1000
+                if response['Crawler']['State'] == 'RUNNING':
+                    logger.debug(response)
+                    logger.info(f'Crawler in RUNNING state. Elapsed time: {elapsed} secs')
+                    time.sleep(wait)
+                    continue
+                elif response['Crawler']['State'] == 'STOPPING':
+                    logger.debug(response)
+                    logger.info(f'Crawler in STOPPING state')
+                    time.sleep(wait)
+                    continue
+                else:
+                    status = response['Crawler']['LastCrawl']['Status']
+                    logger.debug(response)
+                    logger.info(f'Crawler in READY state. Table update {status}')
+                    break
+
+        return
