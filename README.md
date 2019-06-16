@@ -1,4 +1,6 @@
 # cheapodb
+[![CircleCI](https://circleci.com/gh/mineralzen/cheapodb.svg?style=svg)](https://circleci.com/gh/mineralzen/cheapodb)
+[![PyPI version](https://badge.fury.io/py/cheapodb.svg)](https://badge.fury.io/py/cheapodb) 
 
 A very opinionated, very basic implementation of AWS Glue targeting Athena and S3.  
 
