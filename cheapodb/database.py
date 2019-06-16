@@ -121,9 +121,19 @@ class Database(object):
         )
         return response
 
-    def query(self, sql: str):
+    def query(self, sql: str, results_path: str = None):
+        """
+        Execute a query
+
+        :param sql: the Athena-compliant SQL to execute
+        :param results_path: optional S3 path to write results. Defaults to current DB bucket and
+        instance results_prefix
+        :return:
+        """
+        if not results_path:
+            results_path = f's3://{self.bucket}/{self.results_prefix}'
         cursor = connect(
-            s3_staging_dir=f's3://{self.bucket}/{self.results_prefix}',
+            s3_staging_dir=results_path,
             region_name=self.region
         ).cursor()
         cursor.execute(sql)
@@ -146,6 +156,12 @@ class Database(object):
         pass
 
     def create_crawler(self, prefix) -> str:
+        """
+        Create a Glue crawler
+
+        :param prefix: the DB bucket prefix to crawl
+        :return: the name of the created crawler
+        """
         logger.info(f'Creating crawler {self.name}')
         try:
             payload = dict(
@@ -162,22 +178,10 @@ class Database(object):
                 )
             )
             self.glue.create_crawler(**payload)
-            response = self.glue.get_crawler(
-                Name=self.name
-            )
-            return response['Crawler']['Name']
+            return self.glue.get_crawler(Name=self.name)['Crawler']['Name']
         except self.glue.exceptions.AlreadyExistsException:
             logger.warning(f'Crawler {self.name} already exists')
-            response = self.glue.get_crawler(
-                Name=self.name
-            )
-            return response['Crawler']['Name']
-
-    def get_crawler(self, crawler) -> dict:
-        response = self.glue.get_crawler(
-            Name=crawler
-        )
-        return response
+            return self.glue.get_crawler(Name=self.name)['Crawler']['Name']
 
     def delete_crawler(self, crawler) -> dict:
         response = self.glue.delete_crawler(
@@ -194,7 +198,7 @@ class Database(object):
         if wait:
             logger.info(f'Waiting for table update to complete...')
             while True:
-                response = self.get_crawler(crawler)
+                response = self.glue.get_crawler(Name=crawler)
                 if response['Crawler']['State'] == 'RUNNING':
                     elapsed = response['Crawler']['CrawlElapsedTime']
                     logger.info(f'Crawler in RUNNING state. Elapsed time: {elapsed}')
@@ -211,6 +215,3 @@ class Database(object):
                     break
 
         return
-
-
-
