@@ -27,7 +27,8 @@ def read(fname):
 
 
 install_requires = [
-    'boto3==1.9.169'
+    'boto3==1.9.169',
+    'PyAthena==1.6.1'
 ]
 
 setup(
@@ -36,6 +37,9 @@ setup(
     long_description=read('README.md'),
     long_description_content_type='text/markdown',
     install_requires=install_requires,
+    extras_require={
+        'pandas': ['pandas>=0.24.0']
+    },
     url='https://github.com/mineralzen/cheapodb',
     keywords=['data', 'aws'],
     packages=find_packages(exclude=('test*',)),

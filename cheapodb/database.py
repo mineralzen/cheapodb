@@ -8,7 +8,7 @@ from cheapodb import logger
 
 class Database(object):
     def __init__(self, name: str, region: str = None, description: str = None, auto_create=True,
-                 enable_versioning=False,
+                 enable_versioning=False, staging_subdir='results',
                  enable_access_logging=False, create_iam_role=True, iam_role_name=None,
                  tags: dict = None, default_encryption=False, enable_request_metrics=False, enable_object_lock=False,
                  **kwargs):
@@ -19,6 +19,7 @@ class Database(object):
         self.description = description
         self.auto_create = auto_create
         self.enable_versioning = enable_versioning
+        self.staging_subdir = f's3://{self.name}/{staging_subdir}/'
         self.enable_access_logging = enable_access_logging
         self.create_iam_role = create_iam_role
         self.iam_role_name = iam_role_name
