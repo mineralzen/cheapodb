@@ -203,19 +203,18 @@ class Database(object):
             logger.info(f'Waiting for table update to complete...')
             while True:
                 response = self.glue.get_crawler(Name=crawler)
+                elapsed = response['Crawler']['CrawlElapsedTime'] / 1000
                 if response['Crawler']['State'] == 'RUNNING':
-                    elapsed = response['Crawler']['CrawlElapsedTime']
-                    logger.info(f'Crawler in RUNNING state. Elapsed time: {elapsed}')
+                    logger.info(f'Crawler in RUNNING state. Elapsed time: {elapsed} secs')
                     time.sleep(wait)
                     continue
                 elif response['Crawler']['State'] == 'STOPPING':
-                    elapsed = response['Crawler']['CrawlElapsedTime']
-                    logger.info(f'Crawler in STOPPING state. Elapsed time: {elapsed}')
+                    logger.info(f'Crawler in STOPPING state')
                     time.sleep(wait)
                     continue
                 else:
                     status = response['Crawler']['LastCrawl']['Status']
-                    logger.info(f'Crawler in READY state. Table update {status}')
+                    logger.info(f'Crawler in READY state. Table update {status}. Elapsed time was {elapsed} secs')
                     break
 
         return
