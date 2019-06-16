@@ -7,12 +7,16 @@ from cheapodb.schema import Schema
 
 
 class Table(object):
-    def __init__(self, name: str, schema: Schema):
+    def __init__(self, name: str, schema: Schema, create_prefix=True):
         self.name = name
         self.schema = schema
+        self.create_prefix = create_prefix
 
     def upload(self, f) -> None:
-        target = os.path.join(self.schema.name, self.name)
+        if self.create_prefix:
+            target = os.path.join(self.schema.name, self.name, self.name)
+        else:
+            target = os.path.join(self.schema.name, self.name)
         logger.info(f'Uploading file {f} to {target}')
         self.schema.db.bucket.upload_file(f, target)
         return
