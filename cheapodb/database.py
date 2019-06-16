@@ -162,26 +162,27 @@ class Database(object):
         """
         pass
 
-    def create_crawler(self, prefix) -> str:
+    def create_crawler(self, name) -> str:
         """
         Create a new Glue crawler.
 
-        Either loads a crawler or creates it if it doesn't exist.
+        Either loads a crawler or creates it if it doesn't exist. The provided name of the crawler
+        corresponds to the prefix of the DB bucket it will target.
 
-        :param prefix: the DB bucket prefix to crawl
+        :param name: the DB bucket prefix to crawl
         :return: the name of the created crawler
         """
-        logger.info(f'Creating crawler {self.name}')
+        logger.info(f'Creating crawler {name}')
         try:
             payload = dict(
-                Name=self.name,
+                Name=name,
                 Role=self.iam_role_arn,
                 DatabaseName=self.name,
                 Description=f'Crawler created by CheapoDB on {datetime.now():%Y-%m-%d %H:%M:%S}',
                 Targets=dict(
                     S3Targets=[
                         {
-                            'Path': f'{self.name}/{prefix}/'
+                            'Path': f'{self.name}/{name}/'
                         }
                     ]
                 )
