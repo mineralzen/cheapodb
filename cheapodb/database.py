@@ -9,6 +9,8 @@ import boto3
 from pyathena import connect
 from pyathena.cursor import Cursor
 
+from cheapodb.utils import CheapoDBException
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(name)s %(levelname)-8s %(message)s',
@@ -20,13 +22,13 @@ logger = logging.getLogger(__name__)
 
 class Database(object):
     def __init__(self, name: str, description: str = None, auto_create=False, results_prefix='results/',
-                 create_iam_role=True, iam_role_name=None, **kwargs):
+                 create_iam_role=False, iam_role_arn=None, **kwargs):
         self.name = name
         self.description = description
         self.auto_create = auto_create
         self.results_prefix = results_prefix
         self.create_iam_role = create_iam_role
-        self.iam_role_name = iam_role_name
+        self.iam_role_arn = iam_role_arn
 
         self.session = boto3.session.Session(
             region_name=kwargs.get('aws_default_region', os.getenv('AWS_DEFAULT_REGION')),
@@ -39,11 +41,11 @@ class Database(object):
 
         self.bucket = self.s3.Bucket(self.name)
 
-        if self.create_iam_role and not self.iam_role_name:
-            self.iam_role_name = f'{self.name}-CheapoDBExecutionRole'
+        if self.create_iam_role and not self.iam_role_arn:
+            iam_role_name = f'{self.name}-CheapoDBExecutionRole'
             try:
                 response = iam.create_role(
-                    RoleName=self.iam_role_name,
+                    RoleName=iam_role_name,
                     Path='/service-role/',
                     Description=f'IAM role created by CheapoDB on {datetime.now():%Y-%m-%d %H:%M:%S}',
                     AssumeRolePolicyDocument=json.dumps(dict(
@@ -63,13 +65,13 @@ class Database(object):
                 self.iam_role_arn = response['Role']['Arn']
 
                 response = iam.attach_role_policy(
-                    RoleName=self.iam_role_name,
+                    RoleName=iam_role_name,
                     PolicyArn='arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole'
                 )
                 logger.debug(response)
 
                 response = iam.put_role_policy(
-                    RoleName=self.iam_role_name,
+                    RoleName=iam_role_name,
                     PolicyName='CheapoDBRolePolicy',
                     PolicyDocument=json.dumps(dict(
                         Version='2012-10-17',
@@ -89,16 +91,14 @@ class Database(object):
                 )
                 logger.debug(response)
             except iam.exceptions.EntityAlreadyExistsException:
-                logger.debug(f'Role already exists for database: CheapoDBRole-{self.name}')
-                response = iam.get_role(
-                    RoleName=self.iam_role_name
-                )
-                self.iam_role_arn = response['Role']['Arn']
-        elif self.iam_role_name:
-            response = iam.get_role(
-                RoleName=self.iam_role_name
-            )
-            self.iam_role_arn = response['Role']['Arn']
+                msg = f'Role already exists for database: CheapoDBRole-{self.name}. ' \
+                      f'Provide the role ARN as iam_role_arn.'
+                raise CheapoDBException(msg)
+
+        elif not self.create_iam_role and not self.iam_role_arn:
+            msg = f'No IAM role ARN provided and create_iam_role was False. ' \
+                  f'Provide either an existing role ARN or set create_iam_role to True.'
+            raise CheapoDBException(msg)
 
         if self.auto_create:
             self.create()
@@ -199,6 +199,15 @@ class Database(object):
             return self.glue.get_crawler(Name=name)['Crawler']['Name']
 
     def update_tables(self, crawler, wait: Union[bool, int] = 60) -> None:
+        """
+        Run the provided crawler to update the tables in the prefix.
+        Optionally wait for completion, which is the default.
+
+        :param crawler: the name of the Glue Crawler to execute
+        :param wait: optionally wait for the crawler to complete by providing the number of seconds to wait between
+        polling requests. False if this method should return immediately after starting the crawler.
+        :return:
+        """
         logger.info(f'Updating tables with crawler {crawler}')
         response = self.glue.start_crawler(
             Name=crawler
