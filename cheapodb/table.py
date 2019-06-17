@@ -10,11 +10,23 @@ logging.basicConfig(
     datefmt='%a, %d %b %Y %H:%M:%S'
 )
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 class Table(object):
+    """
+    A Table object represents the components that make up a table in AWS Glue.
+
+    Provides methods for Glue, Athena and S3
+    """
     def __init__(self, name: str, db: Database, prefix: str):
+        """
+        Create a Table instance
+
+        :param name: the name of the Table
+        :param db: the Database that will contain the Table
+        :param prefix: the prefix in the Database where the Table data will reside
+        """
         self.name = name
         self.db = db
         self.prefix = prefix
@@ -66,12 +78,12 @@ class Table(object):
 
     def upload(self, f) -> None:
         """
-        Upload the table data file to the database bucket and prefix
+        Upload the table data file(s) to the database bucket and prefix
 
         :param f: path to the file
         :return:
         """
         target = os.path.join(self.prefix, self.name, self.name)
-        logger.info(f'Uploading file {f} to {target}')
+        log.info(f'Uploading file {f} to {target}')
         self.db.bucket.upload_file(f, target)
         return
