@@ -20,6 +20,14 @@ def normalize_table_name(name):
 
 
 def create_cheapodb_role(name, client, bucket) -> str:
+    """
+    Create an AWS IAM service role with the appropriate permissions for Glue and the database's S3 bucket.
+
+    :param name:
+    :param client:
+    :param bucket:
+    :return:
+    """
     try:
         response = client.create_role(
             RoleName=name,
@@ -69,7 +77,7 @@ def create_cheapodb_role(name, client, bucket) -> str:
         log.debug(response)
     except client.exceptions.EntityAlreadyExistsException:
         msg = f'Role already exists for database: CheapoDBRole-{bucket}. ' \
-            f'Provide the role ARN as iam_role_arn.'
+              f'Provide the role ARN as iam_role_arn.'
         raise CheapoDBException(msg)
 
     return iam_role_arn
