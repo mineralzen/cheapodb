@@ -2,6 +2,8 @@ import os
 import logging
 from typing import List
 
+from dask.dataframe import DataFrame
+
 from cheapodb.database import Database
 
 logging.basicConfig(
@@ -87,3 +89,29 @@ class Table(object):
         log.info(f'Uploading file {f} to {target}')
         self.db.bucket.upload_file(f, target)
         return
+
+    def from_dataframe(self, df: DataFrame, **kwargs) -> None:
+        """
+        Load a Dask DataFrame as parquet to the database bucket and prefix
+
+        :param df: the Dask DataFrame object to load as parquet
+        :param kwargs: additional keyword arguments provided to Dask DataFrame.to_parquet
+        :return:
+        """
+        target = f's3://{os.path.join(self.db.name, self.prefix, self.name)}'
+        df.to_parquet(path=target, engine='fastparquet', **kwargs)
+        return
+
+
+if __name__ == '__main__':
+    import dask
+    db = Database(name='',
+                  auto_create=False,
+                  iam_role_arn='arn:aws:iam::'
+                  )
+    table = Table(name='demo', db=db, prefix='demo')
+    df = dask.dataframe.read_csv(
+        ''
+
+    )
+    table.from_dataframe(df)

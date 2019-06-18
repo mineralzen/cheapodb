@@ -28,7 +28,11 @@ def read(fname):
 
 install_requires = [
     'boto3==1.9.169',
-    'PyAthena==1.6.1'
+    'dask[dataframe]==1.2.2',
+    'fastparquet==0.3.1',
+    'pandas==0.24.2',
+    'PyAthena==1.6.1',
+    's3fs==0.2.1'
 ]
 
 setup(
