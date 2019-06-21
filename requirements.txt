@@ -6,6 +6,7 @@ docutils==0.14
 fastparquet==0.3.1
 future==0.17.1
 jmespath==0.9.4
+joblib==0.13.2
 llvmlite==0.29.0
 locket==0.2.0
 numba==0.44.0
