@@ -1,5 +1,4 @@
 import os
-import json
 import time
 import logging
 from datetime import datetime
@@ -9,24 +8,30 @@ import boto3
 from pyathena import connect
 from pyathena.cursor import Cursor
 
+from cheapodb.utils import CheapoDBException, create_cheapodb_role, normalize_table_name
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(name)s %(levelname)-8s %(message)s',
     datefmt='%a, %d %b %Y %H:%M:%S'
 )
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 class Database(object):
+    """
+    A database object represents the components that make up a database in AWS Glue.
+
+    Provides methods for Glue, Athena and S3
+    """
     def __init__(self, name: str, description: str = None, auto_create=False, results_prefix='results/',
-                 create_iam_role=True, iam_role_name=None, **kwargs):
+                 create_iam_role=False, iam_role_arn=None, **kwargs):
         self.name = name
         self.description = description
         self.auto_create = auto_create
         self.results_prefix = results_prefix
-        self.create_iam_role = create_iam_role
-        self.iam_role_name = iam_role_name
+        self.iam_role_arn = iam_role_arn
 
         self.session = boto3.session.Session(
             region_name=kwargs.get('aws_default_region', os.getenv('AWS_DEFAULT_REGION')),
@@ -35,76 +40,30 @@ class Database(object):
         )
         self.s3 = self.session.resource('s3')
         self.glue = self.session.client('glue')
-        iam = self.session.client('iam')
-
         self.bucket = self.s3.Bucket(self.name)
 
-        if self.create_iam_role and not self.iam_role_name:
-            self.iam_role_name = f'{self.name}-CheapoDBExecutionRole'
-            try:
-                response = iam.create_role(
-                    RoleName=self.iam_role_name,
-                    Path='/service-role/',
-                    Description=f'IAM role created by CheapoDB on {datetime.now():%Y-%m-%d %H:%M:%S}',
-                    AssumeRolePolicyDocument=json.dumps(dict(
-                        Version='2012-10-17',
-                        Statement=[
-                            {
-                                'Sid': '',
-                                'Effect': 'Allow',
-                                'Principal': {
-                                    'Service': 'glue.amazonaws.com'
-                                },
-                                'Action': 'sts:AssumeRole'
-                            }
-                        ]
-                    ))
-                )
-                self.iam_role_arn = response['Role']['Arn']
-
-                response = iam.attach_role_policy(
-                    RoleName=self.iam_role_name,
-                    PolicyArn='arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole'
-                )
-                logger.debug(response)
-
-                response = iam.put_role_policy(
-                    RoleName=self.iam_role_name,
-                    PolicyName='CheapoDBRolePolicy',
-                    PolicyDocument=json.dumps(dict(
-                        Version='2012-10-17',
-                        Statement=[
-                            {
-                                'Effect': 'Allow',
-                                'Action': [
-                                    's3:GetObject',
-                                    's3:PutObject'
-                                ],
-                                'Resource': [
-                                    f'arn:aws:s3:::{self.name}*'
-                                ]
-                            }
-                        ]
-                    ))
-                )
-                logger.debug(response)
-            except iam.exceptions.EntityAlreadyExistsException:
-                logger.debug(f'Role already exists for database: CheapoDBRole-{self.name}')
-                response = iam.get_role(
-                    RoleName=self.iam_role_name
-                )
-                self.iam_role_arn = response['Role']['Arn']
-        elif self.iam_role_name:
-            response = iam.get_role(
-                RoleName=self.iam_role_name
+        if create_iam_role and not self.iam_role_arn:
+            self.iam_role_arn = create_cheapodb_role(
+                name=f'{self.name}-CheapoDBExecutionRole',
+                client=self.session.client('iam'),
+                bucket=self.name
             )
-            self.iam_role_arn = response['Role']['Arn']
+
+        elif not create_iam_role and not self.iam_role_arn:
+            msg = f'No IAM role ARN provided and create_iam_role was False. ' \
+                  f'Provide either an existing role ARN or set create_iam_role to True.'
+            raise CheapoDBException(msg)
 
         if self.auto_create:
             self.create()
 
-    def create(self, ) -> dict:
-        logger.info(f'Creating database {self.name} in {self.session.region_name}')
+    def create(self):
+        """
+        Create the database, which consists of an S3 bucket and Glue database object
+
+        :return:
+        """
+        log.info(f'Creating database {self.name} in {self.session.region_name}')
 
         bucket_params = dict(
             CreateBucketConfiguration=dict(
@@ -112,7 +71,7 @@ class Database(object):
             )
         )
         response = self.bucket.create(**bucket_params)
-        logger.debug(response)
+        log.debug(response)
 
         db_params = dict(Name=self.name)
         if self.description:
@@ -120,7 +79,9 @@ class Database(object):
         self.glue.create_database(
             DatabaseInput=db_params
         )
-        return response
+        log.debug(response)
+
+        return
 
     def query(self, sql: str, results_path: str = None) -> dict:
         """
@@ -136,13 +97,15 @@ class Database(object):
 
         cursor = self.export(sql, results_path)
         columns = [column[0] for column in cursor.description]
-        logger.info(cursor.description)
+        log.info(cursor.description)
         for row in cursor:
             yield dict(zip(columns, row))
 
     def export(self, sql: str, results_path: str) -> Cursor:
         """
-        Execute a query and return the cursor
+        Execute a query and return the cursor.
+
+        Useful for building the athena query results as a file export to a destination bucket/prefix
 
         :param sql: the Athena-compliant SQL to execute
         :param results_path: required S3 path to write export
@@ -171,7 +134,7 @@ class Database(object):
         :return: the name of the created crawler
         """
         try:
-            logger.debug(f'Creating crawler {name}')
+            log.debug(f'Creating crawler {name}')
             payload = dict(
                 Name=name,
                 Role=self.iam_role_arn,
@@ -195,34 +158,43 @@ class Database(object):
             self.glue.create_crawler(**payload)
             return self.glue.get_crawler(Name=name)['Crawler']['Name']
         except self.glue.exceptions.AlreadyExistsException:
-            logger.debug(f'Crawler {name} already exists')
+            log.debug(f'Crawler {name} already exists')
             return self.glue.get_crawler(Name=name)['Crawler']['Name']
 
     def update_tables(self, crawler, wait: Union[bool, int] = 60) -> None:
-        logger.info(f'Updating tables with crawler {crawler}')
+        """
+        Run the provided crawler to update the tables in the prefix.
+        Optionally wait for completion, which is the default.
+
+        :param crawler: the name of the Glue Crawler to execute
+        :param wait: optionally wait for the crawler to complete by providing the number of seconds to wait between
+        polling requests. False if this method should return immediately after starting the crawler.
+        :return:
+        """
+        log.info(f'Updating tables with crawler {crawler}')
         response = self.glue.start_crawler(
             Name=crawler
         )
-        logger.debug(response)
+        log.debug(response)
         if wait:
-            logger.info(f'Waiting for table update to complete...')
+            log.info(f'Waiting for table update to complete...')
             while True:
                 response = self.glue.get_crawler(Name=crawler)
                 elapsed = response['Crawler']['CrawlElapsedTime'] / 1000
                 if response['Crawler']['State'] == 'RUNNING':
-                    logger.debug(response)
-                    logger.info(f'Crawler in RUNNING state. Elapsed time: {elapsed} secs')
+                    log.debug(response)
+                    log.info(f'Crawler in RUNNING state. Elapsed time: {elapsed} secs')
                     time.sleep(wait)
                     continue
                 elif response['Crawler']['State'] == 'STOPPING':
-                    logger.debug(response)
-                    logger.info(f'Crawler in STOPPING state')
+                    log.debug(response)
+                    log.info(f'Crawler in STOPPING state')
                     time.sleep(wait)
                     continue
                 else:
                     status = response['Crawler']['LastCrawl']['Status']
-                    logger.debug(response)
-                    logger.info(f'Crawler in READY state. Table update {status}')
+                    log.debug(response)
+                    log.info(f'Crawler in READY state. Table update {status}')
                     break
 
         return
