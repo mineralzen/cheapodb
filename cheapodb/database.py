@@ -155,8 +155,9 @@ class Database(object):
         cursor.execute(sql)
         return cursor
 
-    def create_crawler(self, name, schedule: str = None, table_prefix: str = None, update_behavior='UPDATE_IN_DATABASE',
-                       delete_behavior='DELETE_FROM_DATABASE', description: str = None) -> str:
+    def create_crawler(self, name, schedule: str = None, table_prefix: str = None, target: str = None,
+                       update_behavior='UPDATE_IN_DATABASE', delete_behavior='DELETE_FROM_DATABASE',
+                       description: str = None) -> str:
         """
         Create a new Glue crawler.
 
@@ -166,12 +167,15 @@ class Database(object):
         :param name: the DB bucket prefix to crawl
         :param schedule: an optional schedule in cron syntax to run the crawler
         :param table_prefix: an optional prefix to apply to the created tables
+        :param target: an optional target path to crawl
         :param update_behavior: how the crawler should handle schema updates
         :param delete_behavior: how the crawler should handle deletions
         :param description: Optional crawler description
         :return: the name of the created crawler
         """
         log.info(f'Creating crawler {name}')
+        if not target:
+            target = f'{self.name}/{name}/'
         if not description:
             description = f'Crawler created by CheapoDB on {datetime.now():%Y-%m-%d %H:%M:%S}'
         try:
@@ -183,7 +187,7 @@ class Database(object):
                 Targets=dict(
                     S3Targets=[
                         {
-                            'Path': f'{self.name}/{name}/'
+                            'Path': target
                         }
                     ]
                 ),
