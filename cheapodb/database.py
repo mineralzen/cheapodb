@@ -4,11 +4,10 @@ import logging
 from datetime import datetime
 from typing import Union
 
-import boto3
 from pyathena import connect
 from pyathena.cursor import Cursor
 
-from cheapodb.utils import CheapoDBException, create_cheapodb_role, normalize_table_name
+from cheapodb.utils import CheapoDBException, create_cheapodb_role, normalize_table_name, create_session
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,20 +26,33 @@ class Database(object):
     """
     def __init__(self, name: str, description: str = None, auto_create=False, results_prefix='results/',
                  create_iam_role=False, iam_role_arn=None, **kwargs):
+        """
+        Initialize a database object
+
+        :param name: name of the database
+        :param description: optional description of the database (shown in Glue catalog)
+        :param auto_create: if True, automatically create the database if it doesn't already exist
+        :param results_prefix: optional S3 prefix to store query results
+        :param create_iam_role: True to automatically create an IAM role with necessary permissions. One of
+        create_iam_role or iam_role_arn is required
+        :param iam_role_arn: an optional ARN of an existing IAM role. One of create_iam_role or iam_role_arn is
+        required
+        :param kwargs:
+        """
         self.name = name
         self.description = description
         self.auto_create = auto_create
         self.results_prefix = results_prefix
         self.iam_role_arn = iam_role_arn
 
-        self.session = boto3.session.Session(
-            region_name=kwargs.get('aws_default_region', os.getenv('AWS_DEFAULT_REGION')),
-            aws_access_key_id=kwargs.get('aws_access_key_id', os.getenv('AWS_ACCESS_KEY_ID')),
-            aws_secret_access_key=kwargs.get('aws_secret_access_key', os.getenv('AWS_SECRET_ACCESS_KEY'))
+        self.session = create_session(
+            region_name=kwargs.pop('aws_default_region', os.getenv('AWS_DEFAULT_REGION')),
+            aws_access_key_id=kwargs.pop('aws_access_key_id', os.getenv('AWS_ACCESS_KEY_ID')),
+            aws_secret_access_key=kwargs.pop('aws_secret_access_key', os.getenv('AWS_SECRET_ACCESS_KEY'))
         )
-        self.s3 = self.session.resource('s3')
+        self.s3 = self.session.client('s3')
+        self.bucket = self.session.resource('s3').Bucket(self.name)
         self.glue = self.session.client('glue')
-        self.bucket = self.s3.Bucket(self.name)
 
         if create_iam_role and not self.iam_role_arn:
             self.iam_role_arn = create_cheapodb_role(
@@ -83,6 +95,30 @@ class Database(object):
 
         return
 
+    @property
+    def tables(self) -> list:
+        """
+        Get a listing of all tables that exist in the database
+
+        :return:
+        """
+        tables = list()
+        while True:
+            payload = dict(
+                DatabaseName=self.name,
+                MaxResults=100
+            )
+            response = self.glue.get_tables(**payload)
+            log.debug(response)
+
+            if not response['TableList']:
+                break
+            if response['NextToken']:
+                payload['NextToken'] = response['NextToken']
+            tables += response['TableList']
+
+        return tables
+
     def query(self, sql: str, results_path: str = None) -> dict:
         """
         Execute a query
@@ -93,7 +129,7 @@ class Database(object):
         :return:
         """
         if not results_path:
-            results_path = f's3://{self.bucket.name}/{self.results_prefix}'
+            results_path = f's3://{self.name}/{self.results_prefix}'
 
         cursor = self.export(sql, results_path)
         columns = [column[0] for column in cursor.description]
@@ -113,13 +149,14 @@ class Database(object):
         """
         cursor = connect(
             s3_staging_dir=results_path,
-            region_name=self.session.region_name
+            region_name=self.session.region_name,
+            role_arn=self.iam_role_arn
         ).cursor()
         cursor.execute(sql)
         return cursor
 
     def create_crawler(self, name, schedule: str = None, table_prefix: str = None, update_behavior='UPDATE_IN_DATABASE',
-                       delete_behavior='DELETE_FROM_DATABASE') -> str:
+                       delete_behavior='DELETE_FROM_DATABASE', description: str = None) -> str:
         """
         Create a new Glue crawler.
 
@@ -131,15 +168,18 @@ class Database(object):
         :param table_prefix: an optional prefix to apply to the created tables
         :param update_behavior: how the crawler should handle schema updates
         :param delete_behavior: how the crawler should handle deletions
+        :param description: Optional crawler description
         :return: the name of the created crawler
         """
+        log.info(f'Creating crawler {name}')
+        if not description:
+            description = f'Crawler created by CheapoDB on {datetime.now():%Y-%m-%d %H:%M:%S}'
         try:
-            log.debug(f'Creating crawler {name}')
             payload = dict(
                 Name=name,
                 Role=self.iam_role_arn,
                 DatabaseName=self.name,
-                Description=f'Crawler created by CheapoDB on {datetime.now():%Y-%m-%d %H:%M:%S}',
+                Description=description,
                 Targets=dict(
                     S3Targets=[
                         {
@@ -147,19 +187,33 @@ class Database(object):
                         }
                     ]
                 ),
-                TablePrefix=table_prefix,
-                SchemaChangePolicy={
-                    'UpdateBehavior': update_behavior,
-                    'DeleteBehavior': delete_behavior
-                }
+                TablePrefix=f'{normalize_table_name(table_prefix)}_',
+                SchemaChangePolicy=dict(
+                    UpdateBehavior=update_behavior,
+                    DeleteBehavior=delete_behavior
+                )
             )
             if schedule:
                 payload['Schedule'] = schedule
             self.glue.create_crawler(**payload)
+            log.info(f'Created crawler {name}')
             return self.glue.get_crawler(Name=name)['Crawler']['Name']
         except self.glue.exceptions.AlreadyExistsException:
-            log.debug(f'Crawler {name} already exists')
+            log.warning(f'Crawler {name} already exists')
             return self.glue.get_crawler(Name=name)['Crawler']['Name']
+
+    def delete_crawler(self, name: str) -> None:
+        """
+        Delete a Glue crawler
+
+        :param name: the name of the crawler to delete
+        :return:
+        """
+        log.info(f'Deleting crawler {name}')
+        self.glue.delete_crawler(
+            Name=name
+        )
+        return
 
     def update_tables(self, crawler, wait: Union[bool, int] = 60) -> None:
         """

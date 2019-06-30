@@ -1,10 +1,13 @@
 import os
 import logging
+from urllib.parse import urlencode, quote_plus
 from typing import List
 
 from dask.dataframe import DataFrame
 
 from cheapodb.database import Database
+from cheapodb.utils import normalize_table_name
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,16 +24,16 @@ class Table(object):
 
     Provides methods for Glue, Athena and S3
     """
-    def __init__(self, name: str, db: Database, prefix: str):
+    def __init__(self, db: Database, name: str, prefix: str):
         """
         Create a Table instance
 
-        :param name: the name of the Table
         :param db: the Database that will contain the Table
+        :param name: the name of the Table
         :param prefix: the prefix in the Database where the Table data will reside
         """
-        self.name = name
         self.db = db
+        self.name = normalize_table_name(name)
         self.prefix = prefix
 
     @property
@@ -63,6 +66,7 @@ class Table(object):
             if response['NextToken']:
                 payload['NextToken'] = response['NextToken']
             versions += response['TableVersions']
+
         return versions
 
     def describe(self) -> dict:
@@ -78,16 +82,111 @@ class Table(object):
             Name=self.name
         )
 
-    def upload(self, f) -> None:
+    def upload(self, f, tags: dict = None) -> None:
         """
         Upload the table data file(s) to the database bucket and prefix
 
-        :param f: path to the file
+        :param f: path to the file to upload
+        :param tags: an optional dict of key:value tags to apply to the uploaded object
         :return:
         """
         target = os.path.join(self.prefix, self.name, self.name)
         log.info(f'Uploading file {f} to {target}')
-        self.db.bucket.upload_file(f, target)
+
+        extra_args = None
+        if tags:
+            extra_args = dict(
+                Tagging=urlencode(tags)
+            )
+
+        self.db.bucket.upload_file(f, target, ExtraArgs=extra_args)
+        return
+
+    def download(self, f) -> None:
+        """
+        Download the originally uploaded table data file to the specified path
+
+        :param f: path where downloaded file will be stored
+        :return:
+        """
+        target = os.path.join(self.prefix, self.name, self.name)
+        log.info(f'Downloading file {target} to {f}')
+        self.db.bucket.download_file(target, f)
+        return
+
+    def as_parquet(self, df: DataFrame, **kwargs) -> None:
+        """
+        Load a Dask DataFrame as parquet to the database bucket and prefix
+
+        :param df: the Dask DataFrame object to load as parquet
+        :param kwargs: additional keyword arguments provided to Dask DataFrame.to_parquet
+        :return:
+        """
+        target = f's3://{os.path.join(self.db.name, self.prefix, self.name)}'
+        df.to_parquet(path=target, **kwargs)
+        return
+
+    def as_geojson(self, df: DataFrame, compression=None, **kwargs) -> None:
+        """
+
+        :param df:
+        :param compression:
+        :param kwargs:
+        :return:
+        """
+        # import geojson
+        # from geomet.wkt import dumps
+
+        target = f's3://{os.path.join(self.db.name, self.prefix, self.name)}'
+        df.to_json(target, compression=compression, **kwargs)
+        return
+
+    def delete_table(self, include_data: bool = True, include_crawler: bool = False) -> None:
+        """
+        Delete a table in a Glue database
+
+        :param include_data: True to include the underlying data in S3
+        :param include_crawler: True to include the associated crawler for the prefix
+        :return:
+        """
+        if include_data:
+            d = f'{self.prefix}/{self.name}'
+            log.info(f'Deleting data at {d}')
+            try:
+                versions = self.db.s3.list_object_versions(
+                    Bucket=self.db.name,
+                    Prefix=d
+                )['Versions']
+                actions = [self.db.s3.delete_object(
+                    Bucket=self.db.name,
+                    Key=x['Key'],
+                    VersionId=x['VersionId']
+                ) for x in versions]
+                log.debug(actions)
+                log.info(f'Deleted data at {d}')
+            except KeyError:
+                log.warning(f'Data does not exist at {self.db.name}/{d}')
+
+        if include_crawler:
+            log.info(f'Deleting crawler {self.prefix}')
+            try:
+                response = self.db.glue.delete_crawler(
+                    Name=self.prefix
+                )
+                log.debug(response)
+                log.info(f'Deleted crawler {self.prefix}')
+            except self.db.glue.exceptions.EntityNotFoundException:
+                log.warning(f'Crawler {self.prefix} does not exist')
+        try:
+            log.info(f'Deleting table {self.prefix}_{self.name}')
+            response = self.db.glue.delete_table(
+                DatabaseName=self.db.name,
+                Name=f'{self.prefix}-{self.name}'
+            )
+            log.debug(response)
+            log.info(f'Deleted table {self.prefix}_{self.name}')
+        except self.db.glue.exceptions.EntityNotFoundException:
+            log.warning(f'Table does not exist in {self.db.name}')
         return
 
     def from_dataframe(self, df: DataFrame, **kwargs) -> None:
