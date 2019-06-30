@@ -1,6 +1,6 @@
 import os
 import logging
-from urllib.parse import urlencode, quote_plus
+from urllib.parse import urlencode
 from typing import List
 
 from dask.dataframe import DataFrame
@@ -141,12 +141,11 @@ class Table(object):
         df.to_json(target, compression=compression, **kwargs)
         return
 
-    def delete_table(self, include_data: bool = True, include_crawler: bool = False) -> None:
+    def delete_table(self, include_data: bool = True) -> None:
         """
         Delete a table in a Glue database
 
         :param include_data: True to include the underlying data in S3
-        :param include_crawler: True to include the associated crawler for the prefix
         :return:
         """
         if include_data:
@@ -166,17 +165,6 @@ class Table(object):
                 log.info(f'Deleted data at {d}')
             except KeyError:
                 log.warning(f'Data does not exist at {self.db.name}/{d}')
-
-        if include_crawler:
-            log.info(f'Deleting crawler {self.prefix}')
-            try:
-                response = self.db.glue.delete_crawler(
-                    Name=self.prefix
-                )
-                log.debug(response)
-                log.info(f'Deleted crawler {self.prefix}')
-            except self.db.glue.exceptions.EntityNotFoundException:
-                log.warning(f'Crawler {self.prefix} does not exist')
         try:
             log.info(f'Deleting table {self.prefix}_{self.name}')
             response = self.db.glue.delete_table(

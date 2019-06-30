@@ -4,7 +4,7 @@ import sys
 from setuptools import setup, find_packages
 from setuptools.command.install import install
 
-VERSION = '0.0.5'
+VERSION = '0.0.6'
 
 
 class VerifyVersionCommand(install):
@@ -27,8 +27,8 @@ def read(fname):
 
 
 install_requires = [
-    'boto3==1.9.169',
-    'dask[dataframe]==1.2.2',
+    'boto3==1.9.180',
+    'dask[dataframe]==2.0.0',
     'fastparquet==0.3.1',
     'pandas==0.24.2',
     'PyAthena==1.6.1',
