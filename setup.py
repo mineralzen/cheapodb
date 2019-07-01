@@ -4,7 +4,7 @@ import sys
 from setuptools import setup, find_packages
 from setuptools.command.install import install
 
-VERSION = '0.0.7'
+VERSION = '0.0.8'
 
 
 class VerifyVersionCommand(install):
@@ -33,7 +33,8 @@ install_requires = [
     'joblib==0.13.2',
     'pandas==0.24.2',
     'PyAthena==1.6.1',
-    's3fs==0.2.1'
+    's3fs==0.2.1',
+    'smart-open==1.8.4'
 ]
 
 setup(
