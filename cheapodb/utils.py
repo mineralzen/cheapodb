@@ -106,7 +106,7 @@ def create_cheapodb_role(name: str, client, bucket: str, account: str) -> str:
     except client.exceptions.EntityAlreadyExistsException:
         log.warning(f'Role already exists for database: CheapoDBRole-{bucket}')
         iam_role_arn = client.get_role(
-            RoleName=f'CheapoDBRole-{bucket}'
+            RoleName=name
         )
 
     return iam_role_arn
