@@ -58,23 +58,26 @@ class Stream(object):
             log.warning(f'Delivery stream {self.name} does not exist')
 
     @property
+    def exists(self) -> bool:
+        try:
+            self.describe()
+            return True
+        except self.db.firehose.exceptions.ResourceNotFoundException:
+            return False
+
     def describe(self) -> dict:
         return self.db.firehose.describe_delivery_stream(
             DeliveryStreamName=self.name
         )
 
-    @property
-    def exists(self) -> bool:
-        try:
-            s = self.describe
-            return True
-        except self.db.firehose.exceptions.ResourceNotFoundException:
-            return False
-
     @staticmethod
     def _chunks(iterable: Union[Generator, list], size: int):
         iterator = iter(iterable)
+        log.debug(iterator)
         for first in iterator:
+            log.debug(first)
+            if not first:
+                break
             yield chain([first], islice(iterator, size - 1))
 
     def from_records(self, records: Union[Generator, List[dict]], threads: int = 4) -> None:
@@ -92,5 +95,5 @@ class Stream(object):
                     DeliveryStreamName=self.name,
                     Records=[{'Data': f'{json.dumps(record)}\n'.encode()} for record in chunk]
                 )
-                log.info(f'Processed {i} chunks')
+                log.debug(f'Processed {i} chunks')
         return

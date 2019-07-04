@@ -70,6 +70,14 @@ class Table(object):
 
         return versions
 
+    @property
+    def exists(self) -> bool:
+        try:
+            self.describe()
+            return True
+        except (self.db.glue.exceptions.EntityNotFoundException, Exception):
+            return False
+
     def describe(self) -> dict:
         """
         Get a reference to the table with metadata.
