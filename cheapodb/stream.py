@@ -1,5 +1,6 @@
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from itertools import islice, chain
 from typing import Union, Generator, List
 
@@ -73,9 +74,16 @@ class Stream(object):
         :param threads: number of threads for batch putting
         :return:
         """
-        Parallel(n_jobs=threads, prefer='threads')(delayed(self.db.firehose.put_record_batch)(
-            DeliveryStreamName=self.name,
-            Records=[{'Data': json.dumps(f'{x}\n').encode()} for x in chunk]
-        ) for chunk in self._chunks(records, size=500))
+        with ThreadPoolExecutor(max_workers=threads) as executor:
+            executor.submit(
+                self.db.firehose.put_record_batch,
+                DeliveryStreamName=self.name,
+                Records=[{'Data': json.dumps(f'{x}\n').encode()} for x in self._chunks(records, size=500)]
+            )
+
+        # Parallel(n_jobs=threads, prefer='threads')(delayed(self.db.firehose.put_record_batch)(
+        #     DeliveryStreamName=self.name,
+        #     Records=[{'Data': json.dumps(f'{x}\n').encode()} for x in chunk]
+        # ) for chunk in self._chunks(records, size=500))
 
         return
