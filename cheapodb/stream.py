@@ -1,10 +1,13 @@
 import json
 import time
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from itertools import islice, chain
 from typing import Union, Generator, List
 
 from cheapodb import Database
+
+log = logging.getLogger(__name__)
 
 
 class Stream(object):
@@ -46,10 +49,13 @@ class Stream(object):
         return response
 
     def delete(self) -> dict:
-        response = self.db.firehose.delete_delivery_stream(
-            DeliveryStreamName=self.name
-        )
-        return response
+        if self.exists:
+            response = self.db.firehose.delete_delivery_stream(
+                DeliveryStreamName=self.name
+            )
+            return response
+        else:
+            log.warning(f'Delivery stream {self.name} does not exist')
 
     @property
     def describe(self) -> dict:
