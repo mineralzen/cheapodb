@@ -38,6 +38,7 @@ class Stream(object):
         :return: dict describing the delivery stream
         """
         if self.exists:
+            log.info(f'Stream {self.name} exists')
             return self.describe()
         if not buffering:
             buffering = dict(
@@ -61,10 +62,12 @@ class Stream(object):
         )
         response = self.db.firehose.create_delivery_stream(**config)
         while True:
-            if self.exists:
+            time.sleep(30)
+            exists = self.exists
+            log.debug(f'Stream created: {exists}')
+            if exists:
                 break
-            time.sleep(10)
-
+        log.info(f'Created stream {self.name}')
         return response
 
     def delete(self) -> bool:
