@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 from itertools import islice, chain
 from typing import Union, Generator, List
 
-from joblib import Parallel, delayed
 from cheapodb import Database
 
 
@@ -14,8 +13,8 @@ class Stream(object):
         self.name = name
         self.prefix = f'{prefix}/{self.name}/'
 
-    def initialize(self, error_output_prefix: str = None,
-                   buffering: dict = None, compression: str = 'UNCOMPRESSED') -> dict:
+    def initialize(self, error_output_prefix: str = None, buffering: dict = None,
+                   compression: str = 'UNCOMPRESSED') -> dict:
         if self.exists:
             return self.describe
         if not buffering:
@@ -44,6 +43,12 @@ class Stream(object):
                 break
             time.sleep(10)
 
+        return response
+
+    def delete(self) -> dict:
+        response = self.db.firehose.delete_delivery_stream(
+            DeliveryStreamName=self.name
+        )
         return response
 
     @property
@@ -78,12 +83,6 @@ class Stream(object):
             executor.submit(
                 self.db.firehose.put_record_batch,
                 DeliveryStreamName=self.name,
-                Records=[{'Data': json.dumps(f'{x}\n').encode()} for x in self._chunks(records, size=500)]
+                Records=[{'Data': f'{json.dumps(x)}\n'.encode()} for x in self._chunks(records, size=500)]
             )
-
-        # Parallel(n_jobs=threads, prefer='threads')(delayed(self.db.firehose.put_record_batch)(
-        #     DeliveryStreamName=self.name,
-        #     Records=[{'Data': json.dumps(f'{x}\n').encode()} for x in chunk]
-        # ) for chunk in self._chunks(records, size=500))
-
         return
