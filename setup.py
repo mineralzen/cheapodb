@@ -4,7 +4,7 @@ import sys
 from setuptools import setup, find_packages
 from setuptools.command.install import install
 
-VERSION = '0.0.8'
+VERSION = '0.0.9'
 
 
 class VerifyVersionCommand(install):
@@ -28,13 +28,7 @@ def read(fname):
 
 install_requires = [
     'boto3==1.9.180',
-    'dask[dataframe]==2.0.0',
-    'fastparquet==0.3.1',
-    'joblib==0.13.2',
-    'pandas==0.24.2',
-    'PyAthena==1.6.1',
-    's3fs==0.2.1',
-    'smart-open==1.8.4'
+    'PyAthena==1.6.1'
 ]
 
 setup(
@@ -52,7 +46,7 @@ setup(
     package_dir={'directaccess': 'directaccess'},
     license='MIT',
     author='Cole Howard',
-    author_email='cole@mineralzen.com',
+    author_email='cole.howard@mineralzen.com',
     description='Opinionated implementation of AWS Glue',
     cmdclass={
         'verify': VerifyVersionCommand,

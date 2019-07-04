@@ -3,17 +3,8 @@ import logging
 from urllib.parse import urlencode
 from typing import List
 
-from dask.dataframe import DataFrame
-
 from cheapodb.database import Database
 from cheapodb.utils import normalize_table_name
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(name)s %(levelname)-8s %(message)s',
-    datefmt='%a, %d %b %Y %H:%M:%S'
-)
 
 log = logging.getLogger(__name__)
 
@@ -33,8 +24,9 @@ class Table(object):
         :param prefix: the prefix in the Database where the Table data will reside
         """
         self.db = db
-        self.name = normalize_table_name(name)
+        self.name = name
         self.prefix = prefix
+        self.table = normalize_table_name(f'{self.prefix}_{self.name}')
 
     @property
     def columns(self) -> List[dict]:
@@ -57,7 +49,7 @@ class Table(object):
         while True:
             payload = dict(
                 DatabaseName=self.db.name,
-                TableName=self.name,
+                TableName=self.table,
                 MaxResults=100
             )
             response = self.db.glue.get_table_versions(**payload)
@@ -69,6 +61,14 @@ class Table(object):
 
         return versions
 
+    @property
+    def exists(self) -> bool:
+        try:
+            self.describe()
+            return True
+        except (self.db.glue.exceptions.EntityNotFoundException, Exception):
+            return False
+
     def describe(self) -> dict:
         """
         Get a reference to the table with metadata.
@@ -79,7 +79,7 @@ class Table(object):
         """
         return self.db.glue.get_table(
             DatabaseName=self.db.name,
-            Name=self.name
+            Name=self.table
         )
 
     def upload(self, f, tags: dict = None) -> None:
@@ -114,34 +114,7 @@ class Table(object):
         self.db.bucket.download_file(target, f)
         return
 
-    def as_parquet(self, df: DataFrame, **kwargs) -> None:
-        """
-        Load a Dask DataFrame as parquet to the database bucket and prefix
-
-        :param df: the Dask DataFrame object to load as parquet
-        :param kwargs: additional keyword arguments provided to Dask DataFrame.to_parquet
-        :return:
-        """
-        target = f's3://{os.path.join(self.db.name, self.prefix, self.name)}'
-        df.to_parquet(path=target, **kwargs)
-        return
-
-    def as_geojson(self, df: DataFrame, compression=None, **kwargs) -> None:
-        """
-
-        :param df:
-        :param compression:
-        :param kwargs:
-        :return:
-        """
-        # import geojson
-        # from geomet.wkt import dumps
-
-        target = f's3://{os.path.join(self.db.name, self.prefix, self.name)}'
-        df.to_json(target, compression=compression, **kwargs)
-        return
-
-    def delete_table(self, include_data: bool = True) -> None:
+    def delete(self, include_data: bool = True) -> None:
         """
         Delete a table in a Glue database
 
@@ -166,25 +139,13 @@ class Table(object):
             except KeyError:
                 log.warning(f'Data does not exist at {self.db.name}/{d}')
         try:
-            log.info(f'Deleting table {self.prefix}_{self.name}')
+            log.info(f'Deleting table {self.table}')
             response = self.db.glue.delete_table(
                 DatabaseName=self.db.name,
-                Name=f'{self.prefix}-{self.name}'
+                Name=self.table
             )
             log.debug(response)
-            log.info(f'Deleted table {self.prefix}_{self.name}')
+            log.info(f'Deleted table {self.table}')
         except self.db.glue.exceptions.EntityNotFoundException:
             log.warning(f'Table does not exist in {self.db.name}')
-        return
-
-    def from_dataframe(self, df: DataFrame, **kwargs) -> None:
-        """
-        Load a Dask DataFrame as parquet to the database bucket and prefix
-
-        :param df: the Dask DataFrame object to load as parquet
-        :param kwargs: additional keyword arguments provided to Dask DataFrame.to_parquet
-        :return:
-        """
-        target = f's3://{os.path.join(self.db.name, self.prefix, self.name)}'
-        df.to_parquet(path=target, engine='fastparquet', **kwargs)
         return

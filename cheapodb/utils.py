@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import logging
 from datetime import datetime
 import boto3
@@ -29,13 +30,14 @@ def normalize_table_name(name):
     return name
 
 
-def create_cheapodb_role(name, client, bucket) -> str:
+def create_cheapodb_role(name: str, client, bucket: str, account: str) -> str:
     """
     Create an AWS IAM service role with the appropriate permissions for Glue and the database's S3 bucket.
 
-    :param name:
-    :param client:
-    :param bucket:
+    :param name: name of the AWS IAM role to create
+    :param client: AWS IAM client
+    :param bucket: AWS S3 bucket name
+    :param account: AWS account ID
     :return:
     """
     try:
@@ -47,17 +49,30 @@ def create_cheapodb_role(name, client, bucket) -> str:
                 Version='2012-10-17',
                 Statement=[
                     {
-                        'Sid': '',
                         'Effect': 'Allow',
                         'Principal': {
                             'Service': 'glue.amazonaws.com'
                         },
                         'Action': 'sts:AssumeRole'
+                    },
+                    {
+                        'Effect': 'Allow',
+                        'Principal': {
+                            'Service': 'firehose.amazonaws.com'
+                        },
+                        'Action': 'sts:AssumeRole',
+                        'Condition': {
+                            'StringEquals': {
+                                'sts:ExternalId': account
+                            }
+                        }
                     }
                 ]
             ))
         )
         iam_role_arn = response['Role']['Arn']
+        log.debug(f'IAM Role ARN: {iam_role_arn}')
+        time.sleep(5)
 
         response = client.attach_role_policy(
             RoleName=name,
@@ -85,6 +100,7 @@ def create_cheapodb_role(name, client, bucket) -> str:
             ))
         )
         log.debug(response)
+        time.sleep(5)
     except client.exceptions.EntityAlreadyExistsException:
         msg = f'Role already exists for database: CheapoDBRole-{bucket}. ' \
               f'Provide the role ARN as iam_role_arn.'
