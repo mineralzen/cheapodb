@@ -73,13 +73,15 @@ class Database(object):
         :return:
         """
         log.info(f'Creating database {self.name} in {self.session.region_name}')
-
-        bucket_params = dict(
-            CreateBucketConfiguration=dict(
-                LocationConstraint=self.session.region_name
+        if self.session.region_name != 'us-east-1':
+            bucket_params = dict(
+                CreateBucketConfiguration=dict(
+                    LocationConstraint=self.session.region_name
+                )
             )
-        )
-        response = self.bucket.create(**bucket_params)
+            response = self.bucket.create(**bucket_params)
+        else:
+            response = self.bucket.create()
         log.debug(response)
 
         db_params = dict(Name=self.name)
