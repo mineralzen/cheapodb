@@ -8,10 +8,6 @@ import boto3
 log = logging.getLogger(__name__)
 
 
-class CheapoDBException(Exception):
-    pass
-
-
 def create_session(**kwargs):
     return boto3.session.Session(
         region_name=kwargs.get('aws_default_region', os.getenv('AWS_DEFAULT_REGION')),
@@ -104,7 +100,7 @@ def create_cheapodb_role(name: str, client, bucket: str, account: str) -> str:
         log.debug(response)
         time.sleep(5)
     except client.exceptions.EntityAlreadyExistsException:
-        log.warning(f'Role already exists for database: CheapoDBRole-{bucket}')
+        log.warning(f'Role exists for database: CheapoDBRole-{bucket}')
         iam_role_arn = client.get_role(
             RoleName=name
         )['Role']['Arn']
