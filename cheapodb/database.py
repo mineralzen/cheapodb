@@ -7,7 +7,7 @@ from typing import Union
 from pyathena import connect
 from pyathena.cursor import Cursor
 
-from cheapodb.utils import CheapoDBException, create_cheapodb_role, normalize_table_name, create_session
+from cheapodb.utils import create_cheapodb_role, normalize_table_name, create_session
 
 log = logging.getLogger(__name__)
 
@@ -18,24 +18,18 @@ class Database(object):
 
     Provides methods for Glue, Athena and S3
     """
-    def __init__(self, name: str, description: str = None, auto_create=False, results_prefix='results/',
-                 create_iam_role=False, iam_role_arn=None, **kwargs):
+    def __init__(self, name: str, description: str = None, results_prefix='results/', iam_role_arn=None, **kwargs):
         """
         Initialize a database object
 
         :param name: name of the database
         :param description: optional description of the database (shown in Glue catalog)
-        :param auto_create: if True, automatically create the database if it doesn't already exist
         :param results_prefix: optional S3 prefix to store query results
-        :param create_iam_role: True to automatically create an IAM role with necessary permissions. One of
-        create_iam_role or iam_role_arn is required
-        :param iam_role_arn: an optional ARN of an existing IAM role. One of create_iam_role or iam_role_arn is
-        required
+        :param iam_role_arn: an optional ARN of an existing IAM role
         :param kwargs:
         """
         self.name = name
         self.description = description
-        self.auto_create = auto_create
         self.results_prefix = results_prefix
         self.iam_role_arn = iam_role_arn
 
@@ -50,21 +44,13 @@ class Database(object):
         self.firehose = self.session.client('firehose')
         self.iam = self.session.client('iam')
 
-        if create_iam_role and not self.iam_role_arn:
+        if not self.iam_role_arn:
             self.iam_role_arn = create_cheapodb_role(
                 name=f'{self.name}-CheapoDBExecutionRole',
                 client=self.iam,
                 bucket=self.name,
                 account=self.session.client('sts').get_caller_identity()['Account']
             )
-
-        elif not create_iam_role and not self.iam_role_arn:
-            msg = f'No IAM role ARN provided and create_iam_role was False. ' \
-                  f'Provide either an existing role ARN or set create_iam_role to True.'
-            raise CheapoDBException(msg)
-
-        if self.auto_create:
-            self.create()
 
     def create(self):
         """
@@ -73,22 +59,26 @@ class Database(object):
         :return:
         """
         log.info(f'Creating database {self.name} in {self.session.region_name}')
-
-        bucket_params = dict(
-            CreateBucketConfiguration=dict(
-                LocationConstraint=self.session.region_name
+        if self.session.region_name != 'us-east-1':
+            bucket_params = dict(
+                CreateBucketConfiguration=dict(
+                    LocationConstraint=self.session.region_name
+                )
             )
-        )
-        response = self.bucket.create(**bucket_params)
+            response = self.bucket.create(**bucket_params)
+        else:
+            response = self.bucket.create()
         log.debug(response)
 
         db_params = dict(Name=self.name)
         if self.description:
             db_params['Description'] = self.description
-        self.glue.create_database(
-            DatabaseInput=db_params
-        )
-        log.debug(response)
+        try:
+            self.glue.create_database(
+                DatabaseInput=db_params
+            )
+        except self.glue.exceptions.AlreadyExistsException:
+            log.warning(f'Database {self.name} already exists')
 
         return
 
