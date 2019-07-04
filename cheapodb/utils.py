@@ -107,6 +107,6 @@ def create_cheapodb_role(name: str, client, bucket: str, account: str) -> str:
         log.warning(f'Role already exists for database: CheapoDBRole-{bucket}')
         iam_role_arn = client.get_role(
             RoleName=name
-        )
+        )['Role']['Arn']
 
     return iam_role_arn
