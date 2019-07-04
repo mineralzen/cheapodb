@@ -92,15 +92,5 @@ class Stream(object):
                     DeliveryStreamName=self.name,
                     Records=[{'Data': f'{json.dumps(record)}\n'.encode()} for record in chunk]
                 )
-
-                if i % 100000 == 0:
-                    log.info(f'Processing {i} records')
-
-            # with ThreadPoolExecutor(max_workers=threads) as executor:
-            #     executor.submit(
-            #         self.db.firehose.put_record_batch,
-            #         DeliveryStreamName=self.name,
-            #         Records=[[{'Data': f'{json.dumps(x)}\n'.encode()} for x in chunk]
-            #                  for chunk in self._chunks(records, size=500)]
-            #     )
+                log.info(f'Processed {i} chunks')
         return
