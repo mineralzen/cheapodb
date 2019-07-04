@@ -3,20 +3,41 @@ import time
 from itertools import islice, chain
 from typing import Union, Generator, List
 
-import boto3
 from joblib import Parallel, delayed
+from cheapodb import Database
 
 
 class Stream(object):
-    def __init__(self, name: str):
+    def __init__(self, db: Database, name: str, prefix: str):
+        self.db = db
         self.name = name
-        self.firehose = boto3.client('firehose')
+        self.prefix = f'{prefix}/{self.name}/'
 
-    def initialize(self, config):
+    def initialize(self, error_output_prefix: str = None,
+                   buffering: dict = None, compression: str = 'UNCOMPRESSED') -> dict:
         if self.exists:
-            return
-        config = json.loads(config)
-        response = self.firehose.create_delivery_stream(**config)
+            return self.describe
+        if not buffering:
+            buffering = dict(
+                SizeInMBs=5,
+                IntervalInSeconds=300
+            )
+        s3config = dict(
+            RoleARN=self.db.iam_role_arn,
+            BucketARN=f'arn:aws:s3:::{self.db.bucket.name}',
+            Prefix=self.prefix,
+            BufferingHints=buffering,
+            CompressionFormat=compression
+        )
+        if error_output_prefix:
+            s3config['ErrorOutputPrefix'] = error_output_prefix
+
+        config = dict(
+            DeliveryStreamName=self.name,
+            DeliveryStreamType='DirectPut',
+            ExtendedS3DestinationConfiguration=s3config
+        )
+        response = self.db.firehose.create_delivery_stream(**config)
         while True:
             if self.exists:
                 break
@@ -25,17 +46,17 @@ class Stream(object):
         return response
 
     @property
-    def describe(self):
-        return self.firehose.describe_delivery_stream(
+    def describe(self) -> dict:
+        return self.db.firehose.describe_delivery_stream(
             DeliveryStreamName=self.name
         )
 
     @property
     def exists(self) -> bool:
         try:
-            self.describe()
+            s = self.describe
             return True
-        except self.firehose.exceptions.ResourceNotFoundException:
+        except self.db.firehose.exceptions.ResourceNotFoundException:
             return False
 
     @staticmethod
@@ -52,9 +73,9 @@ class Stream(object):
         :param threads: number of threads for batch putting
         :return:
         """
-        Parallel(n_jobs=threads, prefer='threads')(delayed(self.firehose.put_record_batch)(
+        Parallel(n_jobs=threads, prefer='threads')(delayed(self.db.firehose.put_record_batch)(
             DeliveryStreamName=self.name,
-            Records=[{'Data': json.dumps(x).encode()} for x in chunk]
+            Records=[{'Data': json.dumps(f'{x}\n').encode()} for x in chunk]
         ) for chunk in self._chunks(records, size=500))
 
         return

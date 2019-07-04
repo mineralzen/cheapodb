@@ -33,8 +33,9 @@ class Table(object):
         :param prefix: the prefix in the Database where the Table data will reside
         """
         self.db = db
-        self.name = normalize_table_name(name)
+        self.name = name
         self.prefix = prefix
+        self.table = normalize_table_name(f'{self.prefix}_{self.name}')
 
     @property
     def columns(self) -> List[dict]:
@@ -57,7 +58,7 @@ class Table(object):
         while True:
             payload = dict(
                 DatabaseName=self.db.name,
-                TableName=self.name,
+                TableName=self.table,
                 MaxResults=100
             )
             response = self.db.glue.get_table_versions(**payload)
@@ -79,7 +80,7 @@ class Table(object):
         """
         return self.db.glue.get_table(
             DatabaseName=self.db.name,
-            Name=self.name
+            Name=self.table
         )
 
     def upload(self, f, tags: dict = None) -> None:
@@ -166,13 +167,13 @@ class Table(object):
             except KeyError:
                 log.warning(f'Data does not exist at {self.db.name}/{d}')
         try:
-            log.info(f'Deleting table {self.prefix}_{self.name}')
+            log.info(f'Deleting table {self.table}')
             response = self.db.glue.delete_table(
                 DatabaseName=self.db.name,
-                Name=f'{self.prefix}-{self.name}'
+                Name=self.table
             )
             log.debug(response)
-            log.info(f'Deleted table {self.prefix}_{self.name}')
+            log.info(f'Deleted table {self.table}')
         except self.db.glue.exceptions.EntityNotFoundException:
             log.warning(f'Table does not exist in {self.db.name}')
         return
