@@ -6,7 +6,6 @@ from datetime import datetime
 import boto3
 
 log = logging.getLogger(__name__)
-log.setLevel(int(os.getenv('LOGLEVEL', logging.INFO)))
 
 
 class CheapoDBException(Exception):

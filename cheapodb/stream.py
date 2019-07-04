@@ -11,15 +11,34 @@ log = logging.getLogger(__name__)
 
 
 class Stream(object):
+    """
+    A Stream object represents the a Firehose delivery stream.
+    """
     def __init__(self, db: Database, name: str, prefix: str):
+        """
+        Create a Stream instance
+
+        :param db: the Database associated with the delivery stream
+        :param name: the name of the delivery stream
+        :param prefix: a prefix for the delivery stream. The stream name will be added after the prefix name,
+        resulting in a prefix like prefix/name/
+        """
         self.db = db
         self.name = name
         self.prefix = f'{prefix}/{self.name}/'
 
     def initialize(self, error_output_prefix: str = None, buffering: dict = None,
                    compression: str = 'UNCOMPRESSED') -> dict:
+        """
+        Initialize a delivery stream
+
+        :param error_output_prefix: optional S3 prefix for persisting error output
+        :param buffering: optional buffering configuration. If not provided, uses the service defaults
+        :param compression: optional compression, see boto3 documentation for valid values
+        :return: dict describing the delivery stream
+        """
         if self.exists:
-            return self.describe
+            return self.describe()
         if not buffering:
             buffering = dict(
                 SizeInMBs=5,
@@ -48,17 +67,28 @@ class Stream(object):
 
         return response
 
-    def delete(self) -> dict:
+    def delete(self) -> bool:
+        """
+        Delete a delivery stream
+
+        :return: bool
+        """
         if self.exists:
-            response = self.db.firehose.delete_delivery_stream(
+            self.db.firehose.delete_delivery_stream(
                 DeliveryStreamName=self.name
             )
-            return response
+            return True
         else:
             log.warning(f'Delivery stream {self.name} does not exist')
+            return False
 
     @property
     def exists(self) -> bool:
+        """
+        Return True if table exists in the database, false otherwise
+
+        :return: bool
+        """
         try:
             self.describe()
             return True
@@ -66,16 +96,28 @@ class Stream(object):
             return False
 
     def describe(self) -> dict:
+        """
+        Describe an existing delivery stream
+
+        :return: dict
+        """
         return self.db.firehose.describe_delivery_stream(
             DeliveryStreamName=self.name
         )
 
     @staticmethod
     def _chunks(iterable: Union[Generator, list], size: int):
+        """
+        Chunk up iterable, useful for yielding discrete chunks of a generator without prewalking it
+
+        https://stackoverflow.com/a/24527424/3479672
+
+        :param iterable:
+        :param size:
+        :return:
+        """
         iterator = iter(iterable)
-        log.debug(iterator)
         for first in iterator:
-            log.debug(first)
             if not first:
                 break
             yield chain([first], islice(iterator, size - 1))

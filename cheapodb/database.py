@@ -9,12 +9,6 @@ from pyathena.cursor import Cursor
 
 from cheapodb.utils import CheapoDBException, create_cheapodb_role, normalize_table_name, create_session
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(name)s %(levelname)-8s %(message)s',
-    datefmt='%a, %d %b %Y %H:%M:%S'
-)
-
 log = logging.getLogger(__name__)
 
 

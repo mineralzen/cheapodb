@@ -3,17 +3,8 @@ import logging
 from urllib.parse import urlencode
 from typing import List
 
-from dask.dataframe import DataFrame
-
 from cheapodb.database import Database
 from cheapodb.utils import normalize_table_name
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(name)s %(levelname)-8s %(message)s',
-    datefmt='%a, %d %b %Y %H:%M:%S'
-)
 
 log = logging.getLogger(__name__)
 
@@ -123,33 +114,6 @@ class Table(object):
         self.db.bucket.download_file(target, f)
         return
 
-    def as_parquet(self, df: DataFrame, **kwargs) -> None:
-        """
-        Load a Dask DataFrame as parquet to the database bucket and prefix
-
-        :param df: the Dask DataFrame object to load as parquet
-        :param kwargs: additional keyword arguments provided to Dask DataFrame.to_parquet
-        :return:
-        """
-        target = f's3://{os.path.join(self.db.name, self.prefix, self.name)}'
-        df.to_parquet(path=target, **kwargs)
-        return
-
-    def as_geojson(self, df: DataFrame, compression=None, **kwargs) -> None:
-        """
-
-        :param df:
-        :param compression:
-        :param kwargs:
-        :return:
-        """
-        # import geojson
-        # from geomet.wkt import dumps
-
-        target = f's3://{os.path.join(self.db.name, self.prefix, self.name)}'
-        df.to_json(target, compression=compression, **kwargs)
-        return
-
     def delete(self, include_data: bool = True) -> None:
         """
         Delete a table in a Glue database
@@ -184,16 +148,4 @@ class Table(object):
             log.info(f'Deleted table {self.table}')
         except self.db.glue.exceptions.EntityNotFoundException:
             log.warning(f'Table does not exist in {self.db.name}')
-        return
-
-    def from_dataframe(self, df: DataFrame, **kwargs) -> None:
-        """
-        Load a Dask DataFrame as parquet to the database bucket and prefix
-
-        :param df: the Dask DataFrame object to load as parquet
-        :param kwargs: additional keyword arguments provided to Dask DataFrame.to_parquet
-        :return:
-        """
-        target = f's3://{os.path.join(self.db.name, self.prefix, self.name)}'
-        df.to_parquet(path=target, engine='fastparquet', **kwargs)
         return
