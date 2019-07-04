@@ -142,7 +142,7 @@ class Table(object):
         df.to_json(target, compression=compression, **kwargs)
         return
 
-    def delete_table(self, include_data: bool = True) -> None:
+    def delete(self, include_data: bool = True) -> None:
         """
         Delete a table in a Glue database
 
