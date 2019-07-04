@@ -70,9 +70,11 @@ def create_cheapodb_role(name: str, client, bucket: str, account: str) -> str:
                 ]
             ))
         )
-        iam_role_arn = response['Role']['Arn']
-        log.debug(f'IAM Role ARN: {iam_role_arn}')
+        log.debug(response)
         time.sleep(5)
+
+        iam_role_arn = response['Role']['Arn']
+        log.info(f'IAM Role ARN: {iam_role_arn}')
 
         response = client.attach_role_policy(
             RoleName=name,
@@ -102,8 +104,9 @@ def create_cheapodb_role(name: str, client, bucket: str, account: str) -> str:
         log.debug(response)
         time.sleep(5)
     except client.exceptions.EntityAlreadyExistsException:
-        msg = f'Role already exists for database: CheapoDBRole-{bucket}. ' \
-              f'Provide the role ARN as iam_role_arn.'
-        raise CheapoDBException(msg)
+        log.warning(f'Role already exists for database: CheapoDBRole-{bucket}')
+        iam_role_arn = client.get_role(
+            RoleName=f'CheapoDBRole-{bucket}'
+        )
 
     return iam_role_arn
