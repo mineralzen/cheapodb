@@ -43,8 +43,6 @@ class Database(object):
         self.glue = self.session.client('glue')
         self.firehose = self.session.client('firehose')
         self.iam = self.session.client('iam')
-        self.cloudwatch = self.session.client('cloudwatch')
-        self.log_group = kwargs.pop('log_group', self.name)
 
         if not self.iam_role_arn:
             self.iam_role_arn = create_iam_role(
@@ -120,13 +118,13 @@ class Database(object):
         if not results_path:
             results_path = f's3://{self.name}/{self.results_prefix}'
 
-        cursor = self.export(sql, results_path)
+        cursor = self.execute(sql, results_path)
         columns = [column[0] for column in cursor.description]
         log.info(cursor.description)
         for row in cursor:
             yield dict(zip(columns, row))
 
-    def export(self, sql: str, results_path: str) -> Cursor:
+    def execute(self, sql: str, results_path: str) -> Cursor:
         """
         Execute a query and return the cursor.
 
