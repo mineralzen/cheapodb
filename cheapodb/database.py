@@ -7,7 +7,7 @@ from typing import Union
 from pyathena import connect
 from pyathena.cursor import Cursor
 
-from cheapodb.utils import create_cheapodb_role, normalize_table_name, create_session
+from cheapodb.utils import create_iam_role, normalize_table_name, create_session
 
 log = logging.getLogger(__name__)
 
@@ -43,9 +43,11 @@ class Database(object):
         self.glue = self.session.client('glue')
         self.firehose = self.session.client('firehose')
         self.iam = self.session.client('iam')
+        self.cloudwatch = self.session.client('cloudwatch')
+        self.log_group = kwargs.pop('log_group', self.name)
 
         if not self.iam_role_arn:
-            self.iam_role_arn = create_cheapodb_role(
+            self.iam_role_arn = create_iam_role(
                 name=f'{self.name}-CheapoDBExecutionRole',
                 client=self.iam,
                 bucket=self.name,

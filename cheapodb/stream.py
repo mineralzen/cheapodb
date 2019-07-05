@@ -5,27 +5,26 @@ from concurrent.futures import ThreadPoolExecutor
 from itertools import islice, chain
 from typing import Union, Generator, List
 
-from cheapodb import Database
+from cheapodb import Database, Table
 
 log = logging.getLogger(__name__)
 
 
 class Stream(object):
     """
-    A Stream object represents the a Firehose delivery stream.
+    A Stream object represents a Firehose delivery stream.
     """
-    def __init__(self, db: Database, name: str, prefix: str):
+    def __init__(self, db: Database, table: Table, name: str):
         """
         Create a Stream instance
 
         :param db: the Database associated with the delivery stream
+        :param table: the Table associated with the delivery stream
         :param name: the name of the delivery stream
-        :param prefix: a prefix for the delivery stream. The stream name will be added after the prefix name,
-        resulting in a prefix like prefix/name/
         """
         self.db = db
+        self.table = table
         self.name = name
-        self.prefix = f'{prefix}/{self.name}/'
 
     def initialize(self, error_output_prefix: str = None, buffering: dict = None,
                    compression: str = 'UNCOMPRESSED') -> dict:
@@ -48,7 +47,7 @@ class Stream(object):
         s3config = dict(
             RoleARN=self.db.iam_role_arn,
             BucketARN=f'arn:aws:s3:::{self.db.bucket.name}',
-            Prefix=self.prefix,
+            Prefix=self.table.prefix,
             BufferingHints=buffering,
             CompressionFormat=compression
         )
