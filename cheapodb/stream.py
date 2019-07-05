@@ -1,31 +1,34 @@
 import json
 import time
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import Process, Queue
+from concurrent import futures
 from itertools import islice, chain
 from typing import Union, Generator, List
 
-from cheapodb import Database
+from botocore.config import Config
+
+from cheapodb import Database, Table
 
 log = logging.getLogger(__name__)
 
 
 class Stream(object):
     """
-    A Stream object represents the a Firehose delivery stream.
+    A Stream object represents a Firehose delivery stream.
     """
-    def __init__(self, db: Database, name: str, prefix: str):
+
+    def __init__(self, db: Database, table: Table, name: str):
         """
         Create a Stream instance
 
         :param db: the Database associated with the delivery stream
+        :param table: the Table associated with the delivery stream
         :param name: the name of the delivery stream
-        :param prefix: a prefix for the delivery stream. The stream name will be added after the prefix name,
-        resulting in a prefix like prefix/name/
         """
         self.db = db
+        self.table = table
         self.name = name
-        self.prefix = f'{prefix}/{self.name}/'
 
     def initialize(self, error_output_prefix: str = None, buffering: dict = None,
                    compression: str = 'UNCOMPRESSED') -> dict:
@@ -48,7 +51,7 @@ class Stream(object):
         s3config = dict(
             RoleARN=self.db.iam_role_arn,
             BucketARN=f'arn:aws:s3:::{self.db.bucket.name}',
-            Prefix=self.prefix,
+            Prefix=self.table.prefix,
             BufferingHints=buffering,
             CompressionFormat=compression
         )
@@ -128,17 +131,18 @@ class Stream(object):
     def from_records(self, records: Union[Generator, List[dict]], threads: int = 4) -> None:
         """
         Ingest from a generator or list of dicts
-
         :param records: a generator or list of dicts
         :param threads: number of threads for batch putting
         :return:
         """
-        with ThreadPoolExecutor(max_workers=threads) as executor:
-            for i, chunk in enumerate(self._chunks(records, size=500), start=1):
+        client = self.db.session.client('firehose', config=Config(max_pool_connections=threads))
+        with futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            futures.wait((
                 executor.submit(
-                    self.db.firehose.put_record_batch,
+                    client.put_record_batch,
                     DeliveryStreamName=self.name,
                     Records=[{'Data': f'{json.dumps(record)}\n'.encode()} for record in chunk]
-                )
-                log.debug(f'Processed {i} chunks')
+                ) for chunk in self._chunks(records, size=500)
+            ), timeout=None, return_when=futures.ALL_COMPLETED)
+
         return

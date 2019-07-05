@@ -26,7 +26,7 @@ def normalize_table_name(name):
     return name
 
 
-def create_cheapodb_role(name: str, client, bucket: str, account: str) -> str:
+def create_iam_role(name: str, client, bucket: str, account: str) -> str:
     """
     Create an AWS IAM service role with the appropriate permissions for Glue and the database's S3 bucket.
 

@@ -7,7 +7,7 @@ from typing import Union
 from pyathena import connect
 from pyathena.cursor import Cursor
 
-from cheapodb.utils import create_cheapodb_role, normalize_table_name, create_session
+from cheapodb.utils import create_iam_role, normalize_table_name, create_session
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class Database(object):
         self.iam = self.session.client('iam')
 
         if not self.iam_role_arn:
-            self.iam_role_arn = create_cheapodb_role(
+            self.iam_role_arn = create_iam_role(
                 name=f'{self.name}-CheapoDBExecutionRole',
                 client=self.iam,
                 bucket=self.name,
@@ -118,13 +118,13 @@ class Database(object):
         if not results_path:
             results_path = f's3://{self.name}/{self.results_prefix}'
 
-        cursor = self.export(sql, results_path)
+        cursor = self.execute(sql, results_path)
         columns = [column[0] for column in cursor.description]
         log.info(cursor.description)
         for row in cursor:
             yield dict(zip(columns, row))
 
-    def export(self, sql: str, results_path: str) -> Cursor:
+    def execute(self, sql: str, results_path: str) -> Cursor:
         """
         Execute a query and return the cursor.
 
